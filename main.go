@@ -1,72 +1,51 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"github.com/google/uuid"
+	"OCRtest/utils"
+	"encoding/base64"
+	"github.com/disintegration/imaging"
+	"github.com/rwcarlsen/goexif/exif"
+	"github.com/rwcarlsen/goexif/tiff"
 	"html/template"
+	"io/ioutil"
 	"net/http"
-	"strconv"
-	"time"
+	"strings"
 )
 
-type OCRRequest struct {
-	Version   string    `json:"version"`
-	RequestId string    `json:"requestId"`
-	Timestamp string    `json:"timestamp"`
-	Lang      string    `json:"lang"`
-	Images    *OCRImage `json:"images"`
-}
-
-type OCRImage struct {
-	Format     string   `json:"format"`
-	Url        string   `json:"url"`
-	Data       string   `json:"data"`
-	Name       string   `json:"name"`
-	TemplateId []string `json:"templateId"`
-}
-
 func index(w http.ResponseWriter, r *http.Request) {
-	t, _ := template.ParseFiles("template/index.html")
-	t.Execute(w, "Hello world!")
+	switch r.Method {
+	case "POST":
+		OCRtest(w, r)
+	case "GET":
+		t, _ := template.ParseFiles("template/index.html")
+		_ = t.Execute(w, "Upload Image")
+	}
 }
 
 func OCRtest(w http.ResponseWriter, r *http.Request) {
-	ocrURl := "https://f150jn75jw.apigw.ntruss.com/custom/v1/628/2b6ca66f008b370fad3002b8c5d1b5a89c90fcd9fb5f5e7ed909df1e80d13b5e/general"
-	ocrSecretKey := "YXhlaERrVnFpcFNPTENRbWtCUkJHSVRJTkJ4V21CYmM="
-	_ = r.ParseForm()
-	println(r)
-	file, _, err := r.FormFile("sample")
-	if err != nil {
-		panic(err)
-	} else {
-		fmt.Println(file)
-	}
-	timestamp := int(time.Now().Unix())
+	ch := make(chan string)
+	var orientation *tiff.Tag
 
-	ocrImages := OCRImage{
-		Format:     "jpg",
-		Url:        "localhost:8080/sample.jpg",
-		Data:       "",
-		Name:       "sample",
-		TemplateId: []string{"test"},
-	}
-	ocrRequset := OCRRequest{
-		Version:   "V1",
-		RequestId: uuid.New().String(),
-		Timestamp: strconv.Itoa(timestamp),
-		Lang:      "ko",
-		Images:    &ocrImages,
-	}
-	doc, err := json.Marshal(ocrRequset)
-	println(doc)
-	req, err := http.NewRequest("POST", ocrURl, nil)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Add("Content-type", "application/json")
-	req.Header.Add("X-OCR-SECRET", ocrSecretKey)
+	file, fileHeader, _ := r.FormFile("sample")
+	defer file.Close()
+	split := strings.Split(fileHeader.Filename, ".")
+	suffix := split[len(split)-1]
 
+	go func() {
+		x, _ := exif.Decode(file)
+		_, _ = file.Seek(0, 0)
+		orientation, _ = x.Get(exif.Orientation)
+		ch <- orientation.String()
+	}()
+
+	go func() {
+		val := <-ch
+		img := utils.ConvertImage(file, suffix, val)
+		imaging.Save(img, "./images/"+fileHeader.Filename)
+		bytesData, _ := ioutil.ReadFile("./images/" + fileHeader.Filename)
+		encData := base64.StdEncoding.EncodeToString(bytesData)
+		utils.RequsetOCR(encData)
+	}()
 }
 
 func main() {
@@ -75,6 +54,5 @@ func main() {
 		Handler: nil,
 	}
 	http.HandleFunc("/index", index)
-	http.HandleFunc("/sample", OCRtest)
 	server.ListenAndServe()
 }

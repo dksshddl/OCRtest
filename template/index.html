@@ -6,11 +6,15 @@
 </head>
 <body>
 <div>
+    {{.}}
+</div>
+<div>
     <img width="400px" height="300px" id="test" alt="" src="">
 </div>
-<form action="http://localhost:8080/sample" method="post">
+<form action="http://localhost:8080/index" method="post" enctype="multipart/form-data">
     <input type="file" name="sample">
     <input type="submit">
 </form>
 </body>
 </html>
+
